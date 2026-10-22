@@ -1,6 +1,8 @@
 from typing import TypedDict, List
+import pandas as pd
 from langchain_core.documents import Document
 
 class State(TypedDict):
     filepath: str
-    filedata: List[Document]
+    dataframe: pd.DataFrame
+    data_profile: dict
