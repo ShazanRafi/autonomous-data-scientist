@@ -1,7 +1,7 @@
 from typing import TypedDict, List
 import pandas as pd
 from langchain_core.documents import Document
-from planner import Plan
+from agent.planner import Plan
 
 class State(TypedDict):
     filepath: str
