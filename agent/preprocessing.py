@@ -28,6 +28,7 @@ def select_model(state: State)-> dict:
     selected_model = next(
         model.name
         for model in plan.candidate_models
+        if model.role == "primary"
     )
 
     return {"selected_model": selected_model}
@@ -64,6 +65,7 @@ def analyze_scaling_needs(state: State)-> dict:
 def choose_scaler(state: State)-> dict:
     need_scale = state['should_scale']
     scaling_report = state['scaling_report']
+    percentage_of_outlier = state['profile']['percentage_of_outlier']
 
     if (need_scale == False):
         pass

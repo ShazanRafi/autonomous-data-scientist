@@ -1,6 +1,6 @@
 from state import State
 import pandas as pd
-from helping_function import detect_outliers, find_potential_ids, find_text_columns
+from helping_function import detect_outliers, find_potential_ids, find_text_columns, percentage_of_outliers
 from pandas.api.types import is_datetime64_any_dtype
 
 def loader_node(state: State) -> dict:
@@ -50,9 +50,12 @@ def profiler_node(state: State) -> dict:
     correlation = df.corr(numeric_only=True).to_dict()
 
     outlier = {}
-
     for col in df.select_dtypes(include="number").columns:
         outlier[col] = detect_outliers(df[col])
+
+    outlier_percentage = {}
+    for col in df.select_dtypes(include="number").columns:
+        outlier[col] = percentage_of_outliers(df[col])
 
     profile = {
         'shape': shape,
@@ -75,7 +78,8 @@ def profiler_node(state: State) -> dict:
         'variance_of numerical_columns': variance,
         'skewness_of_numerical_columns': skewness,
         'correlation_among_all_numerical_columns': correlation,
-        'Outlier': outlier
+        'Outlier': outlier,
+        'percentage_of_outlier': outlier_percentage
     }
 
     return{'data_profile': profile}

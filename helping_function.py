@@ -30,6 +30,16 @@ def detect_outliers(series):
 
         return (series < lower) | (series > upper)
 
+def percentage_of_outliers(series):
+    series = series.dropna()
+
+    if len(series) == 0:
+        return 0.0
+
+    outliers = detect_outliers(series)
+    return round(outliers.sum() / len(series) * 100, 2)
+
+    
 def find_potential_ids(df):
     n_rows = len(df)
 
