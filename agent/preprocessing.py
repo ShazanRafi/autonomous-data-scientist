@@ -33,7 +33,33 @@ def select_model(state: State)-> dict:
 
     return {"selected_model": selected_model}
 
+#**********************************************************************IMPUTATION********************************************************************
 
+def analyze_missing_values(state: State) -> dict:
+    X_train = state["X_train"]
+    column_types = state["column_registry"].ColumnRegistry
+    missing_report = {}
+
+    for col in X_train.columns:
+        n_missing = int(X_train[col].isnull().sum())
+        if n_missing == 0:
+            continue
+
+        s = X_train[col].dropna()
+        kind = column_types.get(col, {}).get("kind", "unknown")
+        info = {
+            "kind": kind,
+            "n_missing": n_missing,
+            "missing_percentage": round(float(X_train[col].isnull().mean() * 100), 2),
+            "unique_values": int(s.nunique()),
+        }
+        if kind.startswith("numeric"):
+            info["skewness"] = float(s.skew()) if len(s) > 2 else 0.0
+            info["percentage_of_outlier"] = percentage_of_outliers(s)
+
+        missing_report[col] = info
+
+    return {"missing_report": missing_report}
 
 # def handling_missing_value(state: State)-> dict:
 #     X_train = state['X_train']
