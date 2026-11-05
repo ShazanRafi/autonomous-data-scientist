@@ -32,9 +32,12 @@ def profiler_node(state: State) -> dict:
         "memory_usage_bytes": int(df.memory_usage(deep=True).sum())
     }
     numerical_description = df.describe().to_dict()
+
     categorical_description = df.describe(
         include = ["object", "category", "bool"]
     ).to_dict()
+
+    
     null_values = df.isnull().sum().to_dict()
 
     null_values_percentage = (
