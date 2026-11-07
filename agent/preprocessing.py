@@ -8,6 +8,7 @@ from registry import MODEL_REGISTRY
 from helping_function import detect_outliers, percentage_of_outliers
 from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler, MaxAbsScaler, PowerTransformer, QuantileTransformer
 from state import State
+import pandas as pd
 
 def train_test_split(state: State)-> dict:
     target = state['target_column']
@@ -36,8 +37,15 @@ def select_model(state: State)-> dict:
 #**********************************************************************IMPUTATION********************************************************************
 
 def analyze_missing_values(state: State) -> dict:
+
     X_train = state["X_train"]
-    column_types = state["column_registry"].ColumnRegistry
+
+    column_types = {}
+    column_registry = state["column_registry"]
+    for col, info in column_registry.items():
+        semantic_type = info["semantic_type"]
+        column_types[col] = semantic_type
+
     missing_report = {}
 
     for col in X_train.columns:
@@ -45,38 +53,149 @@ def analyze_missing_values(state: State) -> dict:
         if n_missing == 0:
             continue
 
-        s = X_train[col].dropna()
-        kind = column_types.get(col, {}).get("kind", "unknown")
+        non_missing_values = X_train[col].dropna()
+        kind = column_types.get(col, "unknown")
         info = {
             "kind": kind,
             "n_missing": n_missing,
             "missing_percentage": round(float(X_train[col].isnull().mean() * 100), 2),
-            "unique_values": int(s.nunique()),
+            "unique_values": int(non_missing_values.nunique()),
         }
         if kind.startswith("numeric"):
-            info["skewness"] = float(s.skew()) if len(s) > 2 else 0.0
-            info["percentage_of_outlier"] = percentage_of_outliers(s)
+            info["skewness"] = float(non_missing_values.skew()) if len(non_missing_values) > 2 else 0.0
+            info["percentage_of_outlier"] = percentage_of_outliers(non_missing_values)
 
         missing_report[col] = info
 
     return {"missing_report": missing_report}
 
-# def handling_missing_value(state: State)-> dict:
-#     X_train = state['X_train']
+def choose_imputer(state: State) -> dict:
+    report = state["missing_report"]
+    model_name = state["selected_model"]
+    handles_nan = MODEL_REGISTRY[model_name].get("native_missing", False)
 
-#     missing_value_per_column = {}
-#     missing_value_per_column_in_percentage = {}
-#     for col in X_train:
-#         missing_value_per_column[col] = X_train[col].isnull().sum()
-#         missing_value_per_column_in_percentage[col] = X_train[col].isnull().mean().mul(100).round(2)
+    column_registry = state["column_registry"]
 
-#     missing_value_plan = {}
-#     missing_value_reasoning = {}
+    numeric_columns = [
+        col for col, info in column_registry.items()
+        if info["semantic_type"].startswith("numeric")
+    ]
 
-#     for col, pct in missing_value_per_column_in_percentage.items():
-#         if pct >= 60:
-#             missing_value_plan[col] : 's'
+    n_rows = len(state["X_train"])
+    n_numeric = len(numeric_columns)
+
+    DROP_PCT = 60
+    INDICATOR_PCT = 5
+    KNN_MAX_PCT = 30
+
+    knn_ok = n_numeric >= 3 and n_rows <= 20_000
+
+    plan, reasoning = {}, {}
+
+    for col, r in report.items():
+        pct = r["missing_percentage"]
+        kind = r["kind"]
+        is_numeric = kind.startswith("numeric")
+
+        if pct > DROP_PCT:
+            plan[col] = {"strategy": "drop", "add_indicator": False}
+            reasoning[col] = f"{pct}% missing, too much to impute reliably"
+            continue
+
+        if handles_nan and is_numeric:
+            plan[col] = {"strategy": "passthrough", "add_indicator": False}
+            reasoning[col] = f"{model_name} handles NaN natively"
+            continue
+
+        indicator = pct >= INDICATOR_PCT
+
+        if is_numeric:
+            skewed = abs(r["skewness"]) >= 1 or r["percentage_of_outlier"] > 5
+            if pct <= KNN_MAX_PCT and pct >= INDICATOR_PCT and knn_ok:
+                strategy = "knn"
+                why = f"{pct}% missing, KNN uses neighbouring rows"
+            elif skewed:
+                strategy = "median"
+                why = f"Skewed or outlier-heavy, median is robust ({pct}% missing)"
+            else:
+                strategy = "mean"
+                why = f"Roughly symmetric, mean is fine ({pct}% missing)"
+
+        elif kind == "binary" or r["unique_values"] == 2:
+            strategy, why = "most_frequent", f"Binary column, mode ({pct}% missing)"
+
+        elif kind in ("categorical_nominal", "categorical_ordinal"):
+            if pct < INDICATOR_PCT:
+                strategy, why = "most_frequent", f"Few missing ({pct}%), mode"
+            else:
+                strategy, why = "constant", f"{pct}% missing, treat as its own 'Missing' category"
+                indicator = False  
+        else:
+            strategy, why = "most_frequent", f"Unknown type, safe default ({pct}% missing)"
+
+        plan[col] = {"strategy": strategy, "add_indicator": indicator}
+        reasoning[col] = why
+
+    return {"imputer_plan": plan, "imputer_reasoning": reasoning}
+
+#*******************************************************************ENCODING*******************************************************************
+
+def choose_encoder(state:State) ->dict:
+    X_train = state['X_train']
+    y_train = state['y_train']
+    column_info = {}
+    plan = {}
+    reasoning = {}
+    column_registry = state["column_registry"]
+    for col, info in column_registry.items():
+        column_info[col] = {
+            'semantic_type': info["semantic_type"],
+            'ordinal_order': info['ordinal_order'],
+            'role': info['role']
+        }
+        
+    for col in X_train:
+
+        if column_info[col]['semantic_type'] == 'id':
+            plan[col] = {'strategy': 'drop', 'ordinal_order': False}
+            reasoning[col] = {"ID-like column, no predictive value"}
+
+        elif column_info[col]['semantic_type'].startswith('numeric') or column_info[col]['semantic_type'] == 'binary' and pd.api.types.is_numeric_dtype(X_train[col]):
+            plan[col] = None
+            reasoning[col] = {'Numeric Column does not need to be Encoded'}
+
+        elif column_info[col]['semantic_type'] == "categorical_nominal":
+            plan[col] = {'strategy': 'one_hot_encoding', 'ordinal_order': False}
+            reasoning[col] = {'Nominal categorical features have no inherent ordering, so One-Hot Encoding represents each category independently without introducing artificial ordinal relationships.'}
+
+        elif column_info[col]['semantic_type'] == 'categorical_ordinal':
+            plan[col] = {'strategy': 'ordinal encoding', 'ordinal_order': column_info[col]['ordinal_order']}
+            reasoning[col] = {'Ordinal categorical features have an inherent order or ranking. Ordinal Encoding preserves this ordering by assigning numerical values according to the category hierarchy.'}
+
+        elif column_info[col]['semantic_type'] == 'constant':
+            plan[col] = {'strategy': 'drop', 'ordinal_order': False}
+            reasoning[col] = {'Constant features contain only one unique value and therefore provide no discriminative information to the model. Dropping them reduces unnecessary features without losing useful information.'}
+
+        elif column_info[col]['semantic_type'] == ['text' or 'datetime']:
+            plan[col] = None
+            reasoning[col] = {'Text and datetime features require specialized preprocessing rather than conventional categorical encoding. Text features may require TF-IDF vectorization, while datetime features can be extracted into meaningful components such as year, month, day, and hour.'}
+
+        else:
+            plan[col] = None
+            reasoning[col] = None
+
+    return {'encoding_plan': plan, 'encoding_reasoning': reasoning}
+
+    
+
+
+def handling_datetime_column(state: State) ->dict:
+    pass
+
+        
             
+
+#********************************************************************SCALING**********************************************************************            
 
 def should_scale(state: State) -> dict:
     selected_models = state['selected_model']
@@ -157,7 +276,7 @@ def choose_scaler(state: State)-> dict:
             plan[col] = "StandardScaler"
             reasoning[col] = "Roughly symmetric with few outliers"
 
-        return {"scaler_plan": plan, "scaler_reasoning": reasoning}
+    return {"scaler_plan": plan, "scaler_reasoning": reasoning}
 
 
 # def choose_encoder(state: State)-> dict:
