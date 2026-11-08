@@ -5,7 +5,7 @@ from llm import gemini_llm
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from registry import MODEL_REGISTRY
-from helping_function import detect_outliers, percentage_of_outliers
+from helping_function import detect_outliers, percentage_of_outliers, remove_rows_with_missing_target, replace_fake_missing_values_with_nan
 from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler, MaxAbsScaler, PowerTransformer, QuantileTransformer
 from state import State
 import pandas as pd
@@ -36,6 +36,45 @@ def select_model(state: State)-> dict:
     )
 
     return {"selected_model": selected_model}
+
+#********************************************************************DATA CLEANING**********************************************************************
+
+
+def data_cleaning(state: State) -> dict:
+    X_train = state['X_train']
+    y_train = state['y_train']
+
+    X_train = replace_fake_missing_values_with_nan(X_train)
+    X_train, y_train = remove_rows_with_missing_target(X_train, y_train)
+    
+
+
+
+
+
+    
+
+
+
+# class DataCleaningPlan(BaseModel):
+#     columns_to_drop: Optional[list[str]] = Field(default_factory=list)
+#     columns_to_impute: Optional[list[str]] = Field(default_factory=list)
+#     columns_to_encode: Optional[list[str]] = Field(default_factory=list)
+#     columns_to_scale: Optional[list[str]] = Field(default_factory=list)
+
+
+
+
+# def data_cleaning(state: State) -> dict:
+#     X_train = state['X_train']
+#     column_registry = state['column_registry']
+
+#     for col, info in column_registry.items():
+#         if info["semantic_type"] == "id":
+#             X_train.drop(columns=[col], inplace=True)
+#         elif info["semantic_type"] == "constant":
+#             X_train.drop(columns=[col], inplace=True)
+        
 
 
 
