@@ -17,80 +17,6 @@ def loader_node(state: State) -> dict:
 
 
 
-def profiler_node(state: State) -> dict:
-    df = state['dataframe']
-    no_of_rows, no_of_columns = df.shape
-    columns = df.columns.tolist()
-    # potential_id_columns = find_potential_ids(df)
-    # text_columns = find_text_columns(df)
-    # numerical_column = df.select_dtypes(include="number")
-    # datetime_columns = [
-    #         col
-    #         for col in df.columns
-    #         if is_datetime64_any_dtype(df[col])
-            # ]
-    
-    # size = df.size
-    info = {
-        "dtypes": df.dtypes.astype(str).to_dict(),
-        "non_null_counts": df.notna().sum().to_dict(),
-        "memory_usage_bytes": int(df.memory_usage(deep=True).sum())
-    }
-    
-    numerical_description = df.describe().to_dict()
-
-    categorical_description = df.describe(
-        include = ["object", "category", "bool"]
-    ).to_dict()
-
-    null_values = df.isnull().sum().to_dict()
-    null_values_percentage = (
-        df.isnull().mean().mul(100).round(2).to_dict()
-    )
-    
-    constant_cols = df.columns[df.nunique(dropna=True) <= 1].tolist()
-
-    duplicate_rows = df.duplicated().sum()
-
-    Unique_values_per_column = df.nunique().to_dict()
-    variance = df.var(numeric_only=True).to_dict()
-    skewness = df.skew(numeric_only=True).to_dict()
-    correlation = df.corr(numeric_only=True).to_dict()
-
-    outlier = {}
-    for col in df.select_dtypes(include="number").columns:
-        outlier[col] = detect_outliers(df[col])
-
-    outlier_percentage = {}
-    for col in df.select_dtypes(include="number").columns:
-        outlier[col] = percentage_of_outliers(df[col])
-
-
-    profile = {
-        'no_of_rows': no_of_rows,
-        'no_of_columns': no_of_columns,
-        'all_columns': columns,
-        'potential_id_columns':potential_id_columns,
-        'text_columns': text_columns,
-        'numerical_columns': numerical_column,
-        'datetime_columns': datetime_columns,
-        'all_column_info': info,
-        'numerical_column_description': numerical_description,
-        'categorical_column_description': categorical_description,
-        'total_missing_values_per_column': null_values,
-        'percentage_of_missing_values_per_column': null_values_percentage,
-        'constant_columns': constant_cols,
-        'total_no_of duplicated_rows': duplicate_rows,
-        'unique values_per_column': Unique_values_per_column,
-        'variance_of numerical_columns': variance,
-        'skewness_of_numerical_columns': skewness,
-        'correlation_among_all_numerical_columns': correlation,
-        'Outlier': outlier,
-        'percentage_of_outlier': outlier_percentage
-    }
-
-    return{'data_profile': profile}
-
 def column_evidence(df, col):
     column = df[col]
     num_rows = len(column)
@@ -205,6 +131,90 @@ def column_categorizing_node(state:State)->dict:
     structured_planner_llm = gemini_llm.with_structured_output(ColumnRegistry)
     result = structured_planner_llm.invoke(prompt)
     registry = {column.name: column.model_dump() for column in result.columns}
+
     return {"column_registry": registry}
 
+
+
+def profiler_node(state: State) -> dict:
+    df = state['dataframe']
+    no_of_rows, no_of_columns = df.shape
+    columns = df.columns.tolist()
+    info = {
+        "dtypes": df.dtypes.astype(str).to_dict(),
+        "non_null_counts": df.notna().sum().to_dict(),
+        "memory_usage_bytes": int(df.memory_usage(deep=True).sum())
+    }
+    
+    numerical_description = df.describe().to_dict()
+
+    categorical_description = df.describe(
+        include = ["object", "category", "bool"]
+    ).to_dict()
+
+    null_values = df.isnull().sum().to_dict()
+    null_values_percentage = (
+        df.isnull().mean().mul(100).round(2).to_dict()
+    )
+    
+    constant_cols = df.columns[df.nunique(dropna=True) <= 1].tolist()
+
+    duplicate_rows = df.duplicated().sum()
+
+    Unique_values_per_column = df.nunique().to_dict()
+    variance = df.var(numeric_only=True).to_dict()
+    skewness = df.skew(numeric_only=True).to_dict()
+    correlation = df.corr(numeric_only=True).to_dict()
+
+    outlier = {}
+    for col in df.select_dtypes(include="number").columns:
+        outlier[col] = detect_outliers(df[col])
+
+    outlier_percentage = {}
+    for col in df.select_dtypes(include="number").columns:
+        outlier[col] = percentage_of_outliers(df[col])
+
+    column_dtypes = {}
+    column_roles = {}
+    categorical_columns = []
+    column_registry = state.get("column_registry")
+    for col, info in column_registry.items():
+        column_dtypes[col] = info["semantic_type"]
+        column_roles[col] = info["role"]
+        if info["semantic_type"].startswith("categorical"):
+            categorical_columns.append(col)
+
+    categorical_value_counts = {}
+    for col in categorical_columns:
+        categorical_value_counts[col] = df[col].value_counts(dropna=False).head(30).to_dict()
+
+
+    sample_values = {}
+    for col in df:
+        sample_values[col] = df[col].dropna().astype(str).unique()[:8].tolist()
+
+
+    profile = {
+        'no_of_rows': no_of_rows,
+        'no_of_columns': no_of_columns,
+        'all_columns': columns,
+        'all_column_info': info,
+        'numerical_column_description': numerical_description,
+        'categorical_column_description': categorical_description,
+        'total_missing_values_per_column': null_values,
+        'percentage_of_missing_values_per_column': null_values_percentage,
+        'constant_columns': constant_cols,
+        'total_no_of duplicated_rows': duplicate_rows,
+        'unique values_per_column': Unique_values_per_column,
+        'variance_of numerical_columns': variance,
+        'skewness_of_numerical_columns': skewness,
+        'correlation_among_all_numerical_columns': correlation,
+        'Outlier': outlier,
+        'percentage_of_outlier': outlier_percentage,
+        'column_dtypes': column_dtypes,
+        'column_roles': column_roles,
+        'sample_values_per_column': sample_values
+    }
+
+    return{'data_profile': profile}
 

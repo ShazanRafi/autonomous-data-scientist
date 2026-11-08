@@ -10,6 +10,9 @@ from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler, Ma
 from state import State
 import pandas as pd
 
+def choosing_target_column(state: State) ->dict:
+    pass
+
 def train_test_split(state: State)-> dict:
     target = state['target_column']
     df = state['dataframe']
@@ -33,6 +36,8 @@ def select_model(state: State)-> dict:
     )
 
     return {"selected_model": selected_model}
+
+
 
 #**********************************************************************IMPUTATION********************************************************************
 
@@ -142,7 +147,6 @@ def choose_imputer(state: State) -> dict:
 
 def choose_encoder(state:State) ->dict:
     X_train = state['X_train']
-    y_train = state['y_train']
     column_info = {}
     plan = {}
     reasoning = {}
@@ -187,13 +191,9 @@ def choose_encoder(state:State) ->dict:
     return {'encoding_plan': plan, 'encoding_reasoning': reasoning}
 
     
-
-
-def handling_datetime_column(state: State) ->dict:
+def encoder_for_target_column(state: State) ->dict:
     pass
-
-        
-            
+    
 
 #********************************************************************SCALING**********************************************************************            
 
@@ -279,14 +279,5 @@ def choose_scaler(state: State)-> dict:
     return {"scaler_plan": plan, "scaler_reasoning": reasoning}
 
 
-# def choose_encoder(state: State)-> dict:
-#     X_train = state['X_train']
-#     categorical_column = X_train.select_dtypes(include=["object", "category", "bool"])
-#     for col in categorical_column:
-
-
-
-
-             
 
 
