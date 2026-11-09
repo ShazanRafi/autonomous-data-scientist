@@ -144,7 +144,129 @@ def merge_spelling_variants_of_same_category(X_train: pd.DataFrame, threshold: i
 
     return X_train
 
+
+BOOLEAN_MAPPING = {
+    "yes": True, "y": True, "true": True, "t": True,
+    "1": True, "on": True, "enabled": True, "active": True,
+    "no": False, "n": False, "false": False, "f": False,
+    "0": False, "off": False, "disabled": False, "inactive": False,
+}
+
 def standardize_boolean_labels(X_train: pd.DataFrame) -> pd.DataFrame:
+    X_train = X_train.copy()
+
+    for col in X_train.columns:
+        series = X_train[col]
+
+        if pd.api.types.is_bool_dtype(series):
+            continue
+
+        unique_values = series.dropna().unique()
+
+        if pd.api.types.is_numeric_dtype(series):
+            if len(unique_values) > 0 and set(unique_values).issubset({0, 1}):
+                X_train[col] = series.astype("boolean")
+            continue
+
+        if len(unique_values) == 2:
+            normalized = series.astype("string").str.strip().str.casefold()
+            mapped = normalized.map(BOOLEAN_MAPPING)
+
+            if mapped.notna().sum() == normalized.notna().sum():
+                X_train[col] = mapped.astype("boolean")
+
+    return X_train
+
+import pandas as pd
+
+def convert_text_to_numeric(X_train: pd.DataFrame) -> pd.DataFrame:
+    X_train = X_train.copy()
+
+    for col in X_train.select_dtypes(include=["object", "string"]).columns:
+
+        cleaned = (
+            X_train[col]
+            .astype("string")
+            .str.strip()
+            .str.replace(",", "", regex=False)
+            .str.replace(r"[₹$€£]", "", regex=True)
+            .str.replace("%", "", regex=False)
+        )
+
+        converted = pd.to_numeric(cleaned, errors="coerce")
+
+        original_non_null = X_train[col].notna().sum()
+
+        if original_non_null == 0:
+            continue
+
+        conversion_ratio = converted.notna().sum() / original_non_null
+
+        if conversion_ratio >= 0.90:
+            X_train[col] = converted
+
+    return X_train
+
+def convert_percentage_text_to_number(X_train: pd.DataFrame) -> pd.DataFrame:
+    X_train = X_train.copy()
+
+    percentage_pattern = r"\s*(?:%|percent(?:age)?|per\s+cent|pct)\s*$"
+
+    for col in X_train.select_dtypes(include=["object", "string"]).columns:
+
+        values = X_train[col].astype("string").str.strip()
+
+        percentage_mask = values.str.contains(
+            percentage_pattern,
+            case=False,
+            regex=True,
+            na=False
+        )
+
+        if not percentage_mask.any():
+            continue
+
+        numeric_values = pd.to_numeric(
+            values.str.replace(
+                percentage_pattern, "", regex=True, case=False
+            ).str.strip(),
+            errors="coerce"
+        )
+
+        X_train.loc[percentage_mask, col] = (
+            numeric_values[percentage_mask] / 100
+        )
+
+    return X_train
+
+def convert_text_to_datetime(X_train: pd.DataFrame) -> pd.DataFrame:
+    X_train = X_train.copy()
+
+    for col in X_train.select_dtypes(include=["object", "string"]).columns:
+
+        values = X_train[col].astype("string").str.strip()
+
+        converted = pd.to_datetime(
+            values,
+            errors="coerce",
+            format="mixed"
+        )
+
+        original_non_null = values.notna().sum()
+
+        if original_non_null == 0:
+            continue
+
+        conversion_ratio = converted.notna().sum() / original_non_null
+
+        if conversion_ratio >= 0.90:
+            X_train[col] = converted
+
+    return X_train
+
+
+
+
     
 
 
