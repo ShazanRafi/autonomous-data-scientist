@@ -190,7 +190,6 @@ def convert_text_to_numeric(X_train: pd.DataFrame) -> pd.DataFrame:
             .str.strip()
             .str.replace(",", "", regex=False)
             .str.replace(r"[₹$€£]", "", regex=True)
-            .str.replace("%", "", regex=False)
         )
 
         converted = pd.to_numeric(cleaned, errors="coerce")
@@ -206,6 +205,7 @@ def convert_text_to_numeric(X_train: pd.DataFrame) -> pd.DataFrame:
             X_train[col] = converted
 
     return X_train
+
 
 def convert_percentage_text_to_number(X_train: pd.DataFrame) -> pd.DataFrame:
     X_train = X_train.copy()
@@ -263,6 +263,102 @@ def convert_text_to_datetime(X_train: pd.DataFrame) -> pd.DataFrame:
             X_train[col] = converted
 
     return X_train
+
+def convert_numeric_codes_to_categorical(X_train: pd.DataFrame, column_types: dict) -> pd.DataFrame:
+
+    X_train = X_train.copy()
+
+    for col, semantic_type in column_types.items():
+
+        if col not in X_train.columns:
+            continue
+
+        if semantic_type in {"categorical_nominal", "categorical_ordinal", "binary"}:
+
+            if pd.api.types.is_numeric_dtype(X_train[col]):
+                X_train[col] = X_train[col].astype("category")
+
+    return X_train
+
+def convert_to_correct_dtype(X_train: pd.DataFrame, column_types: dict) -> pd.DataFrame:
+
+    X_train = X_train.copy()
+
+    for col, semantic_type in column_types.items():
+
+        if col not in X_train.columns:
+            continue
+
+        try:
+            if semantic_type == "numeric_continuous":
+                X_train[col] = pd.to_numeric(
+                    X_train[col], errors="coerce"
+                ).astype("float64")
+
+            elif semantic_type == "numeric_discrete":
+                X_train[col] = pd.to_numeric(
+                    X_train[col], errors="coerce"
+                ).astype("Int64")
+
+            elif semantic_type in {
+                "categorical_nominal",
+                "categorical_ordinal",
+                "binary"
+            }:
+                X_train[col] = X_train[col].astype("category")
+
+            elif semantic_type in {"text", "id"}:
+                X_train[col] = X_train[col].astype("string")
+
+            elif semantic_type == "datetime":
+                X_train[col] = pd.to_datetime(
+                    X_train[col], errors="coerce"
+                )
+
+            elif semantic_type == "constant":
+                continue
+
+        except (ValueError, TypeError, OverflowError):
+            continue
+
+    return X_train
+
+def split_combined_column_into_parts(X_train: pd.DataFrame, split_config: dict) -> pd.DataFrame:
+
+    X_train = X_train.copy()
+
+    for col, config in split_config.items():
+
+        if col not in X_train.columns:
+            continue
+
+        separator = config["separator"]
+        new_columns = config["new_columns"]
+
+        try:
+            split_values = (
+                X_train[col]
+                .astype("string")
+                .str.split(separator, regex=False, expand=True)
+            )
+
+            if split_values.shape[1] != len(new_columns):
+                continue
+
+            for i, new_col in enumerate(new_columns):
+                if new_col in X_train.columns:
+                    continue
+
+                X_train[new_col] = split_values[i].str.strip()
+
+            X_train.drop(columns=[col], inplace=True)
+
+        except (ValueError, TypeError, KeyError):
+            continue
+
+    return X_train
+
+
 
 
 
