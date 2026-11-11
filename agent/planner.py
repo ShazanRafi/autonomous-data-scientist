@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from registry import MODEL_REGISTRY
 
 
+
 class TargetSpecification(BaseModel):
     target_column_name: str
     task_type: Literal["binary_classification", "multiclass_classification", "regression"]
@@ -37,7 +38,7 @@ class DataSplitPlan(BaseModel):
 class CleaningStep(BaseModel):
     step_number: int
     cleaning_action: Literal[
-        "replace_fake_missing_values_with_nan",
+        "replace_fake_missing_values_with_nan",#
         "remove_rows_with_missing_target",
         "remove_rows_that_are_completely_empty",
         "replace_infinite_values_with_nan",
@@ -46,15 +47,14 @@ class CleaningStep(BaseModel):
         "fix_unicode_and_encoding_issues",
         "remove_special_characters",
         "merge_spelling_variants_of_same_category",
-        "standardize_boolean_labels",
-        "convert_text_to_numeric",
-        "remove_currency_symbols_and_thousand_separators",
+        "standardize_boolean_labels",#
+        "convert_text_to_numeric",#
         "convert_percentage_text_to_number",
         "convert_text_to_datetime",
         "convert_numeric_codes_to_categorical",
         "convert_to_correct_dtype",
-        "split_combined_column_into_parts",
-        "convert_units_to_common_unit",
+        "split_combined_column_into_parts",#
+        "convert_units_to_common_unit",#
         "fix_impossible_values",
         "fix_wrong_sign_values",
         "cap_physically_impossible_extremes",
