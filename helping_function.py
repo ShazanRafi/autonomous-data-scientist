@@ -1,6 +1,9 @@
 import unicodedata
 import pandas as pd
+import numpy as np
 from rapidfuzz import process, fuzz
+import pint
+ureg = pint.UnitRegistry()
 
 def choose_outlier_method(series):
     skewness = series.skew()
@@ -41,25 +44,45 @@ def percentage_of_outliers(series):
     outliers = detect_outliers(series)
     return round(outliers.sum() / len(series) * 100, 2)
 
+#********************************************************************DATA CLEANING HELPERS********************************************************************
 
-def replace_fake_missing_values_with_nan(dataframe: pd.DataFrame, fake_missing_values: set[str] | None = None, numeric_sentinels: list[float] | None = None) -> pd.DataFrame:
+TEXT_DTYPES = ["object", "string"]
+ 
+def _text_columns(df: pd.DataFrame):
+    return df.select_dtypes(include=TEXT_DTYPES).columns
+ 
+def _map_strings(series: pd.Series, func) -> pd.Series:
+    return series.map(lambda v: func(v) if isinstance(v, str) else v)
 
-    DEFAULT_FAKE_MISSING = {
+
+DEFAULT_FAKE_MISSING = frozenset({
         "", " ", "?", "-", "--", "---", ".", "..", "n/a", "na", "n.a.", "nan",
         "null", "none", "nil", "missing", "unknown", "undefined", "not available",
         "#n/a", "#na", "#null!", "(blank)", "blank", "tbd",
         "not applicable", "not provided", "not specified", "not recorded",
         "not collected", "not reported", "not disclosed", "not documented"
-    }
+    })
+
+def replace_fake_missing_values_with_nan(X_train: pd.DataFrame, fake_missing_values: set[str] | None = None, numeric_sentinels: list[float] | None = None, sentinel_columns: list[str] | None = None) -> pd.DataFrame:
+
+    X_train = X_train.copy()
+ 
+    tokens = set(DEFAULT_FAKE_MISSING)
 
     if fake_missing_values:
-        DEFAULT_FAKE_MISSING.update(fake_missing_values)
+        tokens |= {str(tkn).strip().lower() for tkn in fake_missing_values}
+ 
+    for col in _text_columns(X_train):
+        normalized = X_train[col].astype("string").str.strip().str.lower()
+        X_train[col] = X_train[col].mask(normalized.isin(tokens).fillna(False), np.nan)
+ 
     if numeric_sentinels:
-        DEFAULT_FAKE_MISSING.update(map(str, numeric_sentinels))
-
-    for value in DEFAULT_FAKE_MISSING:
-        dataframe.replace(value, pd.NA, inplace=True)
-        return dataframe
+        columns = sentinel_columns if sentinel_columns else X_train.columns
+        for col in columns:
+            if col in X_train.columns and pd.api.types.is_numeric_dtype(X_train[col]):
+                X_train[col] = X_train[col].mask(X_train[col].isin(numeric_sentinels))
+ 
+    return X_train
 
 def remove_rows_with_missing_target(X_train: pd.DataFrame, y_train: pd.DataFrame):
     mask = y_train.notna()
@@ -79,7 +102,9 @@ def remove_rows_that_are_completely_empty(X_train: pd.DataFrame, y_train: pd.Dat
     return X_train, y_train
 
 def replace_infinite_values_with_nan(X_train: pd.DataFrame) -> pd.DataFrame:
-    X_train.replace([float("inf"), float("-inf")], pd.NA, inplace=True)
+    X_train = X_train.copy()
+    numeric_columns = X_train.select_dtypes(include=[np.number]).columns
+    X_train[numeric_columns] = X_train[numeric_columns].replace([np.inf, -np.inf], np.nan)
     return X_train
 
 def trim_whitespace_from_string_columns(X_train: pd.DataFrame) -> pd.DataFrame:
@@ -357,6 +382,154 @@ def split_combined_column_into_parts(X_train: pd.DataFrame, split_config: dict) 
             continue
 
     return X_train
+
+def convert_units_to_common_unit(X_train: pd.DataFrame, unit_config: dict) -> pd.DataFrame:
+
+    X_train = X_train.copy()
+
+    for col, config in unit_config.items():
+
+        if col not in X_train.columns:
+            continue
+
+        target_unit = config["target_unit"]
+        source_unit = config.get("source_unit")
+
+        converted_values = []
+        valid = True
+
+        for value in X_train[col]:
+
+            if pd.isna(value):
+                converted_values.append(pd.NA)
+                continue
+
+            try:
+                if isinstance(value, (int, float)):
+                    if source_unit is None:
+                        valid = False
+                        break
+
+                    quantity = ureg.Quantity(value, source_unit)
+
+                else:
+                    quantity = ureg.Quantity(str(value).strip())
+
+                converted = quantity.to(target_unit)
+                converted_values.append(float(converted.magnitude))
+
+            except (ValueError, TypeError, pint.errors.PintError):
+                valid = False
+                break
+
+        if valid:
+            X_train[col] = converted_values
+
+    return X_train
+
+import pandas as pd
+
+def fix_impossible_values(X_train: pd.DataFrame, constraint_config: dict) -> pd.DataFrame:
+
+    X_train = X_train.copy()
+
+    for col, constraints in constraint_config.items():
+
+        if col not in X_train.columns:
+            continue
+
+        invalid_mask = pd.Series(False, index=X_train.index)
+
+        min_value = constraints.get("min")
+        max_value = constraints.get("max")
+
+        if min_value is not None:
+            invalid_mask |= X_train[col] < min_value
+
+        if max_value is not None:
+            invalid_mask |= X_train[col] > max_value
+
+        X_train.loc[invalid_mask, col] = pd.NA
+
+    return X_train
+
+import pandas as pd
+
+def fix_wrong_sign_values(X_train: pd.DataFrame,non_negative_columns: list) -> pd.DataFrame:
+
+    X_train = X_train.copy()
+
+    for col in non_negative_columns:
+
+        if col not in X_train.columns:
+            continue
+
+        invalid_mask = X_train[col] < 0
+
+        X_train.loc[invalid_mask, col] = pd.NA
+
+    return X_train
+
+import pandas as pd
+
+def cap_physically_impossible_extremes(X_train, limits_config):
+    X_train = X_train.copy()
+
+    for col, limits in limits_config.items():
+        if col not in X_train.columns:
+            continue
+
+        min_value = limits.get("min")
+        max_value = limits.get("max")
+
+        invalid_mask = pd.Series(False, index=X_train.index)
+
+        if min_value is not None:
+            invalid_mask |= X_train[col] < min_value
+
+        if max_value is not None:
+            invalid_mask |= X_train[col] > max_value
+
+        X_train.loc[invalid_mask, col] = pd.NA
+
+    return X_train
+
+def remove_exact_duplicate_rows(X_train: pd.DataFrame) -> pd.DataFrame:
+    return X_train.drop_duplicates(keep="first").reset_index(drop=True)
+
+def remove_duplicate_rows_by_key_columns(X_train: pd.DataFrame,key_columns: list[str],keep: str = "first"):
+
+
+    missing_columns = set(key_columns) - set(X_train.columns)
+
+    if missing_columns:
+        raise ValueError(
+            f"Key columns not found: {missing_columns}"
+        )
+
+    if not key_columns:
+        raise ValueError("At least one key column is required.")
+
+    before = len(X_train)
+
+    X_train = X_train.drop_duplicates(
+        subset=key_columns,
+        keep=keep,
+        ignore_index=True
+    )
+
+    removed = before - len(X_train)
+
+    return X_train, {
+        "rows_before": before,
+        "rows_after": len(X_train),
+        "duplicates_removed": removed,
+        "duplicate_percentage": round(
+            removed / before * 100, 2
+        ) if before else 0
+    }
+
+
 
 
 
