@@ -2,7 +2,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from state import State
 from llm import gemini_llm
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from registry import MODEL_REGISTRY
 
 
@@ -38,7 +38,7 @@ class DataSplitPlan(BaseModel):
 class CleaningStep(BaseModel):
     step_number: int
     cleaning_action: Literal[
-        "replace_fake_missing_values_with_nan",#
+        "replace_fake_missing_values_with_nan",
         "remove_rows_with_missing_target",
         "remove_rows_that_are_completely_empty",
         "replace_infinite_values_with_nan",
@@ -47,14 +47,14 @@ class CleaningStep(BaseModel):
         "fix_unicode_and_encoding_issues",
         "remove_special_characters",
         "merge_spelling_variants_of_same_category",
-        "standardize_boolean_labels",#
-        "convert_text_to_numeric",#
+        "standardize_boolean_labels",
+        "convert_text_to_numeric",
         "convert_percentage_text_to_number",
         "convert_text_to_datetime",
         "convert_numeric_codes_to_categorical",
         "convert_to_correct_dtype",
-        "split_combined_column_into_parts",#
-        "convert_units_to_common_unit",#
+        "split_combined_column_into_parts",
+        "convert_units_to_common_unit",
         "fix_impossible_values",
         "fix_wrong_sign_values",
         "cap_physically_impossible_extremes",
@@ -74,6 +74,92 @@ class CleaningStep(BaseModel):
     what_to_do_with_values_that_cannot_be_fixed: Literal[
         "set_to_missing", "drop_row", "keep_as_is", "not_applicable"
     ]
+    
+    extra_fake_missing_tokens: Optional[list[str]] = Field(
+        None,
+        description="replace_fake_missing_values_with_nan only: placeholder strings seen in the profile that are NOT "
+                    "already in the built-in list (lowercase). Maps to fake_missing_values.",
+    )
+    numeric_sentinel_values: Optional[list[float]] = Field(
+        None,
+        description="replace_fake_missing_values_with_nan only: numeric placeholders such as -999 or 9999 that the "
+                    "profile makes obvious. Applied only to columns_affected. Maps to numeric_sentinels.",
+    )
+    spelling_similarity_threshold: Optional[int] = Field(
+        None,
+        description="merge_spelling_variants_of_same_category only: rapidfuzz ratio cutoff, 85-100. Default 90. "
+                    "Maps to threshold.",
+    )
+    column_semantic_types: Optional[list[ColumnSemanticType]] = Field(
+        None,
+        description="convert_to_correct_dtype and convert_numeric_codes_to_categorical only. Maps to column_types.",
+    )
+    split_rules: Optional[list[ColumnSplitRule]] = Field(
+        None,
+        description="split_combined_column_into_parts only. Maps to split_config.",
+    )
+    number_format: Optional[Literal["auto", "us", "european"]] = Field(
+        None,
+        description="convert_text_to_numeric only. auto (default) detects the style per column; european = "
+                    "1.234,56; us = 1,234.56. Maps to number_format.",
+    )
+    dayfirst: Optional[bool] = Field(
+        None,
+        description="convert_text_to_datetime only: true if dates are DD/MM/YYYY (day first), false if MM/DD/YYYY "
+                    "or ISO. Maps to dayfirst.",
+    )
+ 
+    @model_validator(mode="after")
+    def check_parameters_match_action(self):
+        action = self.cleaning_action
+ 
+        if action == "merge_spelling_variants_of_same_category":
+            if self.spelling_similarity_threshold is None:
+                self.spelling_similarity_threshold = 90
+            if not 85 <= self.spelling_similarity_threshold <= 100:
+                raise ValueError("spelling_similarity_threshold must be between 85 and 100")
+ 
+        if action in {"convert_to_correct_dtype", "convert_numeric_codes_to_categorical"}:
+            if not self.column_semantic_types:
+                raise ValueError(f"{action} needs column_semantic_types")
+ 
+        if action == "split_combined_column_into_parts":
+            if not self.split_rules:
+                raise ValueError("split_combined_column_into_parts needs split_rules")
+            for rule in self.split_rules:
+                if len(rule.new_column_names) < 2:
+                    raise ValueError(f"split rule for '{rule.source_column}' needs at least 2 new_column_names")
+                if len(set(rule.new_column_names)) != len(rule.new_column_names):
+                    raise ValueError(f"split rule for '{rule.source_column}' has duplicate new_column_names")
+ 
+        return self
+ 
+ 
+def cleaning_step_to_function_kwargs(step: CleaningStep) -> dict:
+    """Turns a planned step into the keyword arguments of its helper function (the DataFrame is passed separately)."""
+    action = step.cleaning_action
+ 
+    if action == "replace_fake_missing_values_with_nan":
+        return {
+            "fake_missing_values": {t.strip().lower() for t in (step.extra_fake_missing_tokens or [])} or None,
+            "numeric_sentinels": step.numeric_sentinel_values or None,
+            "sentinel_columns": step.columns_affected,
+        }
+    if action == "convert_text_to_numeric":
+        return {"number_format": step.number_format or "auto"}
+    if action == "convert_text_to_datetime":
+        return {"dayfirst": bool(step.dayfirst)}
+    if action == "merge_spelling_variants_of_same_category":
+        return {"threshold": step.spelling_similarity_threshold or 90}
+    if action in {"convert_to_correct_dtype", "convert_numeric_codes_to_categorical"}:
+        return {"column_types": {c.column_name: c.semantic_type for c in step.column_semantic_types}}
+    if action == "split_combined_column_into_parts":
+        return {"split_config": {
+            r.source_column: {"separator": r.separator, "new_columns": r.new_column_names}
+            for r in step.split_rules
+        }}
+    return {}
+
 
 class PreprocessingStep(BaseModel):
     step_number: int
