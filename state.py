@@ -35,6 +35,9 @@ class State(TypedDict):
     input_columns_after_dropping: List[str]
     dropped_columns: dict
     drop_skipped: list[dict]
+    numeric_transformer_map: dict
+    transformed_numeric_report: List[dict]
+    skipped_transformed_numeric: dict
 
 
 

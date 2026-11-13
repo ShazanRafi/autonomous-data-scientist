@@ -513,3 +513,105 @@ def group_rare_categories(state: State) -> dict:
         "grouped_rare_categories_report": report,
         "skipped_group_rare_categories": skipped,
     }
+
+
+#********************************************************************TRANSFORMING NUMERIC DISTRIBUTION**********************************************************************
+
+SUPPORTED_DISTRIBUTION_METHODS = {"log1p", "sqrt", "yeo_johnson"}
+NON_NEGATIVE_ONLY_METHODS = {"log1p", "sqrt"}
+TRANSFORMABLE_TYPES = {"numeric_continuous", "numeric_discrete"}
+
+
+def transform_numeric_distribution(state: State) -> dict:
+    X_train: pd.DataFrame = state["X_train"].copy()
+
+    plan = state.get("plan")
+    steps = plan.preprocessing_steps if plan else []
+
+    registry = state.get("column_registry")
+    semantic_type = {c.name: c.semantic_type for c in registry.columns} if registry else {}
+
+    fitted_transforms: dict[str, dict] = {}  
+    report, skipped = [], {}
+
+    for step in steps:
+        if step.preprocessing_action != "transform_numeric_distribution":
+            continue
+
+        method = step.method.strip().lower()
+
+        for col in step.columns_affected or []:
+            if col in fitted_transforms or col in skipped:
+                continue  # first step for a column wins
+
+            if method not in SUPPORTED_DISTRIBUTION_METHODS:
+                skipped[col] = f"unsupported method '{step.method}', supported: {sorted(SUPPORTED_DISTRIBUTION_METHODS)}"
+                continue
+
+            if col not in X_train.columns:
+                skipped[col] = "column not found in X_train (dropped earlier?)"
+                continue
+
+            if semantic_type.get(col) not in TRANSFORMABLE_TYPES:
+                skipped[col] = f"semantic type is '{semantic_type.get(col, 'unknown')}', only numeric_continuous / numeric_discrete are transformed"
+                continue
+
+            if not pd.api.types.is_numeric_dtype(X_train[col]) or pd.api.types.is_bool_dtype(X_train[col]):
+                skipped[col] = f"dtype is {X_train[col].dtype}, not a numeric column"
+                continue
+
+            series = X_train[col].astype("float64")
+            non_null = series.dropna()                 
+
+            if non_null.nunique() < 2:
+                skipped[col] = "constant (or all-missing) in train, nothing to transform"
+                continue
+
+            if method in NON_NEGATIVE_ONLY_METHODS and non_null.min() < 0:
+                skipped[col] = f"{method} needs values >= 0, train min is {non_null.min():.4g}; use yeo_johnson instead"
+                continue
+
+           
+            transformer = None
+            if method == "log1p":
+                transformed = np.log1p(series)
+            elif method == "sqrt":
+                transformed = np.sqrt(series)
+            else:  # yeo_johnson
+                transformer = PowerTransformer(method="yeo-johnson", standardize=False)  # scaling is a separate node
+                transformed = pd.Series(
+                    transformer.fit_transform(series.to_frame()).ravel(),
+                    index=series.index,
+                )
+
+            if not np.isfinite(transformed.dropna()).all():
+                skipped[col] = f"{method} produced inf/NaN values on train, column left unchanged"
+                continue
+
+            skew_before = float(non_null.skew())
+            skew_after = float(transformed.dropna().skew())
+
+            X_train[col] = transformed
+
+            fitted_transforms[col] = {
+                "method": method,
+                "transformer": transformer,                       
+                "lambda": float(transformer.lambdas_[0]) if transformer is not None else None,
+            }
+            report.append({
+                "column": col,
+                "method": method,
+                "lambda": fitted_transforms[col]["lambda"],
+                "skew_before_train": round(skew_before, 3),
+                "skew_after_train": round(skew_after, 3),
+            })
+
+    return {
+        "X_train": X_train,
+        "numeric_transform_map": fitted_transforms,
+        "transformed_numeric_report": report,
+        "skipped_transform_numeric": skipped,
+    }
+
+
+
