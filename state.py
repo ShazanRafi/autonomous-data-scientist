@@ -17,8 +17,14 @@ class State(TypedDict):
     X_test: pd.DataFrame
     y_train: pd.DataFrame
     y_test: pd.DataFrame
-    plan: dict
-    reasoning: dict
+    scaler_plan: dict
+    scaler_reasoning: dict
     llm_registry_profile: dict
     column_registry: dict
+    missing_report: dict
+    imputer_plan: dict
+    imputer_reasoning: dict
+    encoding_plan: dict
+    encoding_reasoning: dict
+    cleaning_report: dict
     

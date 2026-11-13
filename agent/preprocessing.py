@@ -70,7 +70,7 @@ def drop_columns(state: State) -> dict:
 
     return {
         "X_train": X_train[input_columns],
-        "input_columns": input_columns,
+        "input_columns_after_dropping": input_columns,
         "column_registry": {c: i for c, i in state["column_registry"].items() if c in input_columns},
         "dropped_columns": drop_log,
         "drop_skipped": skipped,
@@ -382,6 +382,56 @@ def choose_scaler(state: State)-> dict:
 
     return {"scaler_plan": plan, "scaler_reasoning": reasoning}
 
+#********************************************************************ADDING MISSING INDICATOR COLUMNS**********************************************************************
+
+def add_missing_indicator_column(state: State) -> dict:
+    X_train: pd.DataFrame = state["X_train"].copy()
+
+    plan = state.get("plan")
+    steps = plan.preprocessing_steps if plan else []
+    
+    requested_cols: list[str] = []
+    for step in steps:
+        action = step.preprocessing_action
+        affected_columns = step.columns_affected or []
+        if action == "add_missing_indicator_column":
+            for affected_col in affected_columns:
+                if affected_col not in requested_cols:
+                    requested_cols.append(affected_col)
+            
+
+    added, skipped = [], {}
+
+    for col in requested_cols:
+        if col not in X_train.columns:
+            skipped[col] = "column not found in X_train(dropped earlier?)"
+            continue
+
+        n_missing_train = int(X_train[col].isnull().sum())
+        if n_missing_train == 0:
+            skipped[col] = "no missing values in train, indicator would be a constant 0"
+            continue
+        if n_missing_train == len(X_train):
+            skipped[col] = "all values missing in train, indicator would be a constant 1"
+            continue
+
+        new_col = f"{col}_was_missing"
+        if new_col in X_train.columns:
+            skipped[col] = f"'{new_col}' already exists"
+            continue
+
+        X_train[new_col] = X_train[col].isnull().astype("int8")
+
+        added.append({
+            "source_column": col,
+            "indicator_column": new_col,
+            "train_missing_count": n_missing_train,
+            "train_missing_pct": round(100 * n_missing_train / len(X_train), 2),
+        })
 
 
-
+    return {
+        "X_train": X_train,
+        "added_missing_indicator_columns": added,
+        "skipped_missing_indicator_columns": skipped
+    }
