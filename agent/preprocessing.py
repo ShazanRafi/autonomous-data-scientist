@@ -8,6 +8,7 @@ from data_cleaning_functions import *
 from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler, MaxAbsScaler, PowerTransformer, QuantileTransformer
 from state import State
 import pandas as pd
+import re
 
 def choosing_target_column(state: State) ->dict:
     pass
@@ -434,4 +435,81 @@ def add_missing_indicator_column(state: State) -> dict:
         "X_train": X_train,
         "added_missing_indicator_columns": added,
         "skipped_missing_indicator_columns": skipped
+    }
+
+
+#********************************************************************GROUPING RARE CATEGORIES**********************************************************************
+
+def group_rare_categories(state: State) -> dict:
+    X_train: pd.DataFrame = state["X_train"].copy()
+
+    plan = state.get("plan")
+    steps = plan.preprocessing_steps if plan else []
+
+    registry = state.get("column_registry")
+    semantic_type = {c.name: c.semantic_type for c in registry.columns} if registry else {}
+
+    rare_category_map: dict[str, dict] = {}
+    report, skipped = [], {}
+
+    for step in steps:
+        if step.preprocessing_action != "group_rare_categories":
+            continue
+
+        min_freq = step.rare_category_min_frequency or 0.01
+        label = step.rare_category_label or "Other"
+
+        for col in step.columns_affected or []:
+            if col in rare_category_map or col in skipped:
+                continue  
+
+            if col not in X_train.columns:
+                skipped[col] = "column not found in X_train (dropped earlier?)"
+                continue
+
+            if semantic_type.get(col) != "categorical_nominal":
+                skipped[col] = f"semantic type is '{semantic_type.get(col, 'unknown')}', only categorical_nominal is grouped"
+                continue
+
+            series = X_train[col].astype("object")
+            counts = series.dropna().value_counts()  
+            if counts.empty:
+                skipped[col] = "column is entirely missing in train"
+                continue
+
+            threshold = min_freq * counts.sum()
+            rare = counts[counts < threshold].index.tolist()
+            frequent = counts[counts >= threshold].index.tolist()
+
+            if len(rare) < 2:
+                skipped[col] = f"fewer than 2 rare categories at min_frequency={min_freq}"
+                continue
+            if not frequent:
+                skipped[col] = "every category is rare at this threshold"
+                continue
+
+            final_label = label
+            while final_label in frequent:      
+                final_label += "_grouped"
+
+            X_train[col] = series.where(~series.isin(rare), final_label)
+
+            rare_category_map[col] = {
+                "frequent_categories": frequent,
+                "label": final_label,
+                "min_frequency": min_freq,
+            }
+            report.append({
+                "column": col,
+                "n_categories_before": int(len(counts)),
+                "n_categories_after": int(len(frequent) + 1),
+                "n_rare_grouped": int(len(rare)),
+                "rows_affected_train": int(counts[rare].sum()),
+            })
+
+    return {
+        "X_train": X_train,
+        "rare_category_map": rare_category_map,
+        "grouped_rare_categories_report": report,
+        "skipped_group_rare_categories": skipped,
     }

@@ -27,4 +27,15 @@ class State(TypedDict):
     encoding_plan: dict
     encoding_reasoning: dict
     cleaning_report: dict
+    added_missing_indicator_columns: List[dict]
+    skipped_missing_indicator_columns: dict
+    rare_category_map: dict
+    grouped_rare_category_columns: List[dict]
+    skipped_grouped_rare_category_columns: dict
+    input_columns_after_dropping: List[str]
+    dropped_columns: dict
+    drop_skipped: list[dict]
+
+
+
     
