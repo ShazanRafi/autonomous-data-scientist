@@ -35,6 +35,46 @@ def select_model(state: State)-> dict:
     )
 
     return {"selected_model": selected_model}
+#********************************************************************REMOVING USELESS COLUMNS*******************************************************************
+
+def drop_columns(state: State) -> dict:
+
+    plan = state["plan"]
+    decisions = plan.columns_to_drop
+
+    target_name = state.get("target_column")
+    X_train = state["X_train"]
+
+    skipped = []
+    drop_log = {}
+
+    for d in decisions:
+        col = d.column_name
+
+        if col not in X_train.columns:
+            skipped.append({"column": col, "reason": "not found in X_train (possibly hallucinated or already dropped)"})
+            continue
+        if col == target_name:
+            skipped.append({"column": col, "reason": "refused: this is the target column"})
+            continue
+        if col in drop_log:
+            continue 
+
+        drop_log[col] = {
+            "drop_reason": d.drop_reason,
+            "evidence_from_profile": d.evidence_from_profile,
+            "explanation": d.explanation,
+        }
+
+    input_columns = [c for c in X_train.columns if c not in drop_log]
+
+    return {
+        "X_train": X_train[input_columns],
+        "input_columns": input_columns,
+        "column_registry": {c: i for c, i in state["column_registry"].items() if c in input_columns},
+        "dropped_columns": drop_log,
+        "drop_skipped": skipped,
+    }
 
 #********************************************************************DATA CLEANING**********************************************************************
 
@@ -101,7 +141,6 @@ def data_cleaning(state: State) -> dict:
         "y_train": y_train,
         "cleaning_reports": cleaning_reports
     }
-
 
 
 #**********************************************************************IMPUTATION********************************************************************

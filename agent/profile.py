@@ -193,6 +193,11 @@ def profiler_node(state: State) -> dict:
     for col in df:
         sample_values[col] = df[col].dropna().astype(str).unique()[:8].tolist()
 
+    empty_rows_and_columns = {
+        'empty_rows': int(df.isna().all(axis=1).sum()),
+        'empty_columns': [col for col in df.columns if df[col].isna().all()]
+    }
+
 
     profile = {
         'no_of_rows': no_of_rows,
@@ -213,7 +218,9 @@ def profiler_node(state: State) -> dict:
         'percentage_of_outlier': outlier_percentage,
         'column_dtypes': column_dtypes,
         'column_roles': column_roles,
-        'sample_values_per_column': sample_values
+        'sample_values_per_column': sample_values,
+        'categorical_value_counts': categorical_value_counts,
+        'empty_rows_and_columns': empty_rows_and_columns
     }
 
     return{'data_profile': profile}
